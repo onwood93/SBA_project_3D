@@ -295,8 +295,8 @@ class MyDataset(Dataset):
         origin_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir)
         anchor_keypoints = self.compute_body_parts(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
 
-        random_anchor_keypoints = self.extract_keypoints_from_a_json(self.random_vid_dir) # (frames, 17, 2)
-        aug_keypoints = self.add_aug_to_anchor(random_anchor_keypoints) # 5 * (frames, 12 or 4)
+        # aug_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir) # (frames, 17, 2)
+        aug_keypoints = self.add_aug_to_anchor(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
 
         sp_10 = self.semi_positives_maker() # (10*frames,17,2)
         sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
