@@ -156,7 +156,7 @@ class MyDataset(Dataset):
 
         return aug_keypoints_list
 
-    def compute_heatmap(self, keypoints, h=1080, w=1920, std=5):
+    def compute_heatmap(self, keypoints, h=1080, w=1920, std=5, rate=0.25):
         points = keypoints.reshape(-1,2)
 
         x_points = points[:,[0]]
@@ -166,20 +166,46 @@ class MyDataset(Dataset):
         # W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
         # H = np.tile(np.arange(h)[:, None], (h, w))
         # W = np.tile(np.arange(w)[None, :], (h, w))
-        H = np.tile(np.arange(h)[:, None], w)
-        W = np.tile(np.arange(w)[:, None], h).T
+        H = np.tile(np.arange(int(h * rate))[:, None], int(w * rate))
+        W = np.tile(np.arange(int(w * rate))[:, None], int(h * rate)).T
 
         heatmap_list = []
         for i in range(len(x_points)):
-            x = x_points[i]
-            y = y_points[i]
+            x = x_points[i] * rate
+            y = y_points[i] * rate
             x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2) 
             y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
             frame = (x_gauss * y_gauss)
             heatmap_list.append(frame)
-        heatmaps = np.array(heatmap_list).reshape(-1,17,h,w)
+        heatmaps = np.array(heatmap_list).reshape(-1, 17, int(h * rate), int(w * rate))
 
         return heatmaps
+    
+    def compute_optical_flow(self, keypoints, heatmaps, h=1080, w=1920, rate=0.25):
+        reduced_keypoints = keypoints * rate
+
+        flow_x = []
+        flow_y = []
+        for i in range(1, len(reduced_keypoints)):
+            flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
+            flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
+
+        hw_zeros = np.zeros(shape=(int(h*rate),int(w*rate)))
+
+        opt_flow_x = []
+        opt_flow_y = []
+        for i in range(1,len(heatmaps)):
+            heatmap = heatmaps[i]
+            for j in range(len(heatmap)):
+                tmp_x = hw_zeros + flow_x[i-1][j]
+                tmp_y = hw_zeros + flow_y[i-1][j]
+                opt_flow_x.append(tmp_x * heatmap[j])
+                opt_flow_y.append(tmp_y * heatmap[j])
+
+        reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,1,int(h*rate),int(w*rate))
+        reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,1,int(h*rate),int(w*rate))
+
+        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=2) 
 
     def expanding_sp_dataset(self, sp_keypoints):
         # 프레임이 가장 많은 개수 찾기
@@ -324,6 +350,7 @@ class MyDataset(Dataset):
         sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
         heatmaps = self.compute_heatmap(origin_anchor_keypoints)
+        optical_flow = self.compute_optical_flow(origin_anchor_keypoints, heatmaps)
 
         reshape_sp_10_keypoints = []
         for i in range(len(sp_10_keypoints)):
@@ -359,7 +386,8 @@ class MyDataset(Dataset):
             input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
             input_data[semi_key] = torch.tensor(reshape_sp_10_keypoints[i], dtype=torch.float32)
         
-        input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, kpts, h, w)
+        input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, 17, 270, 480)
+        input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 17, 2, 270, 480)
     
         return input_data
 
