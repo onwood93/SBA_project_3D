@@ -158,28 +158,28 @@ class MyDataset(Dataset):
 
     def compute_heatmap(self, keypoints, h=1080, w=1920, std=5):
         points = keypoints.reshape(-1,2)
-        reduce_rate = h/w
-        reduced_w = int(w * reduce_rate)
 
         x_points = points[:,[0]]
         y_points = points[:,[1]]
 
-        resized_anchor_keypoints = np.array([x_points, y_points*reduce_rate])
-
-        H = np.tile(np.arange(h), h).reshape(h,h).T
-        W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
+        # H = np.tile(np.arange(h), h).reshape(h,h).T
+        # W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
+        # H = np.tile(np.arange(h)[:, None], (h, w))
+        # W = np.tile(np.arange(w)[None, :], (h, w))
+        H = np.tile(np.arange(h)[:, None], w)
+        W = np.tile(np.arange(w)[:, None], h).T
 
         heatmap_list = []
         for i in range(len(x_points)):
             x = x_points[i]
-            y = y_points[i]*reduce_rate
+            y = y_points[i]
             x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2) 
             y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
             frame = (x_gauss * y_gauss)
             heatmap_list.append(frame)
-        heatmaps = np.array(heatmap_list)
+        heatmaps = np.array(heatmap_list).reshape(-1,17,h,w)
 
-        return resized_anchor_keypoints, heatmaps
+        return heatmaps
 
     def expanding_sp_dataset(self, sp_keypoints):
         # 프레임이 가장 많은 개수 찾기
@@ -323,7 +323,7 @@ class MyDataset(Dataset):
         sp_10 = self.semi_positives_maker() # (10*frames,17,2)
         sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
-        resized_anchor_keypoints, heatmaps = self.compute_heatmap(origin_anchor_keypoints)
+        heatmaps = self.compute_heatmap(origin_anchor_keypoints)
 
         reshape_sp_10_keypoints = []
         for i in range(len(sp_10_keypoints)):
@@ -359,8 +359,7 @@ class MyDataset(Dataset):
             input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
             input_data[semi_key] = torch.tensor(reshape_sp_10_keypoints[i], dtype=torch.float32)
         
-        input_data['resized_anchor'] = torch.tensor(resized_anchor_keypoints, dtype=torch.float32) # (2, frames*kpts, 1)
-        input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames*kpts, h, h)
+        input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, kpts, h, w)
     
         return input_data
 
