@@ -5,6 +5,7 @@ import json
 import pathlib
 import torch
 from torch.utils.data import Dataset, DataLoader
+import Config
 
 # def load_data_dir(data_dir):
 #     all_data_dir_list = []
@@ -173,13 +174,17 @@ class MyDataset(Dataset):
         for i in range(len(x_points)):
             x = x_points[i] * rate
             y = y_points[i] * rate
-            x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2) 
-            y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
+            # x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2)
+            # y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
+            y_gauss = np.exp(-0.5*((H-x)/std)**2)
+            x_gauss = np.exp(-0.5*((W-y)/std)**2)
             frame = (x_gauss * y_gauss)
+            frame = frame / frame.max()
             heatmap_list.append(frame)
         heatmaps = np.array(heatmap_list).reshape(-1, 17, int(h * rate), int(w * rate))
 
         return heatmaps
+        # (frames, 17, 270, 480)
     
     def compute_optical_flow(self, keypoints, heatmaps, h=1080, w=1920, rate=0.25):
         reduced_keypoints = keypoints * rate
@@ -190,7 +195,7 @@ class MyDataset(Dataset):
             flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
             flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
 
-        hw_zeros = np.zeros(shape=(int(h*rate),int(w*rate)))
+        hw_zeros = np.zeros(shape=(int(h*rate),int(w*rate))) # 빈 판
 
         opt_flow_x = []
         opt_flow_y = []
@@ -205,7 +210,8 @@ class MyDataset(Dataset):
         reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,1,int(h*rate),int(w*rate))
         reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,1,int(h*rate),int(w*rate))
 
-        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=2) 
+        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=2)
+        # (frames-1, 17, 2, 270, 480)
 
     def expanding_sp_dataset(self, sp_keypoints):
         # 프레임이 가장 많은 개수 찾기
@@ -388,6 +394,7 @@ class MyDataset(Dataset):
         
         input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, 17, 270, 480)
         input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 17, 2, 270, 480)
+        input_data['origin'] = torch.tensor(origin_anchor_keypoints, dtype=torch.float32)
     
         return input_data
 
