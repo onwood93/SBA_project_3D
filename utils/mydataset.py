@@ -5,7 +5,7 @@ import json
 import pathlib
 import torch
 from torch.utils.data import Dataset, DataLoader
-import Config
+import utils.Configs as config
 
 # def load_data_dir(data_dir):
 #     all_data_dir_list = []
@@ -55,6 +55,8 @@ def load_data_dir(data_dir):
 class MyDataset(Dataset):
     def __init__(self, data_dir='', num_semi_positives=10, return_heatmap=False):
         super().__init__()
+        self.h = config.H
+        self.w = config.W
         self.data_dir = data_dir
         self.num_semi_positives = num_semi_positives
         self.return_heatmap = return_heatmap
@@ -157,7 +159,7 @@ class MyDataset(Dataset):
 
         return aug_keypoints_list
 
-    def compute_heatmap(self, keypoints, h=1080, w=1920, std=5, rate=0.25):
+    def compute_heatmap(self, keypoints, std=5, rate=0.25):
         points = keypoints.reshape(-1,2)
 
         x_points = points[:,[0]]
@@ -167,8 +169,8 @@ class MyDataset(Dataset):
         # W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
         # H = np.tile(np.arange(h)[:, None], (h, w))
         # W = np.tile(np.arange(w)[None, :], (h, w))
-        H = np.tile(np.arange(int(h * rate))[:, None], int(w * rate))
-        W = np.tile(np.arange(int(w * rate))[:, None], int(h * rate)).T
+        H = np.tile(np.arange(self.h)[:, None], self.w)
+        W = np.tile(np.arange(self.w)[:, None], self.h).T
 
         heatmap_list = []
         for i in range(len(x_points)):
@@ -181,21 +183,27 @@ class MyDataset(Dataset):
             frame = (x_gauss * y_gauss)
             frame = frame / frame.max()
             heatmap_list.append(frame)
-        heatmaps = np.array(heatmap_list).reshape(-1, 17, int(h * rate), int(w * rate))
+        heatmaps = np.array(heatmap_list).reshape(-1, 17, self.h, self.w)
 
         return heatmaps
         # (frames, 17, 270, 480)
     
-    def compute_optical_flow(self, keypoints, heatmaps, h=1080, w=1920, rate=0.25):
+    def compute_optical_flow(self, keypoints, heatmaps, rate=0.25):
         reduced_keypoints = keypoints * rate
 
-        flow_x = []
-        flow_y = []
-        for i in range(1, len(reduced_keypoints)):
-            flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
-            flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
-
-        hw_zeros = np.zeros(shape=(int(h*rate),int(w*rate))) # 빈 판
+        # flow_x = []
+        # flow_y = []
+        # for i in range(1, len(reduced_keypoints)):
+        #     flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
+        #     flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
+        flow = reduced_keypoints[1:] - reduced_keypoints[:-1]
+        flow_x = flow[:,:,[0]]
+        flow_y = flow[:,:,[1]]
+        hw_zeros = torch.zeros(size=(self.h, self.w)) # 빈 판
+        # flowmap = torch.zeros((len(flow), 2, self.h, self.w))
+        # for i in range(len(flow)):
+        #     flowmap[i][0] = flowmap[i][0] + flow[i][0]
+        #     flowmap[i][1] = flowmap[i][1] + flow[i][1]
 
         opt_flow_x = []
         opt_flow_y = []
@@ -207,11 +215,12 @@ class MyDataset(Dataset):
                 opt_flow_x.append(tmp_x * heatmap[j])
                 opt_flow_y.append(tmp_y * heatmap[j])
 
-        reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,1,int(h*rate),int(w*rate))
-        reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,1,int(h*rate),int(w*rate))
+        reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,self.h,self.w)
+        reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,self.h,self.w)
 
-        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=2)
-        # (frames-1, 17, 2, 270, 480)
+        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=1)
+        # return np.concatenate((opt_flow_x, opt_flow_y),axis=1)
+        # (frames-1, 34, 270, 480)
 
     def expanding_sp_dataset(self, sp_keypoints):
         # 프레임이 가장 많은 개수 찾기
@@ -339,7 +348,7 @@ class MyDataset(Dataset):
         #     # ...
         # }
         # origin_vid_dir 랜덤하게 선정
-        self.random_vid_dir = random.choice(self.all_data_dir_list)
+        # self.random_vid_dir = random.choice(self.all_data_dir_list)
         self.index_vid_dir = self.all_data_dir_list[index]
         key_fn = self.index_vid_dir.split('/')[-1].split('_')[0]
         self.action = key_fn[key_fn.find('A'):]
@@ -393,7 +402,7 @@ class MyDataset(Dataset):
             input_data[semi_key] = torch.tensor(reshape_sp_10_keypoints[i], dtype=torch.float32)
         
         input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, 17, 270, 480)
-        input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 17, 2, 270, 480)
+        input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 34, 270, 480)
         input_data['origin'] = torch.tensor(origin_anchor_keypoints, dtype=torch.float32)
     
         return input_data
