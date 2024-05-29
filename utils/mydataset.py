@@ -1,10 +1,11 @@
 import os
+import math
 import numpy as np
 import random
 import json
 import pathlib
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset
 import utils.Configs as config
 
 # def load_data_dir(data_dir):
@@ -221,6 +222,27 @@ class MyDataset(Dataset):
         return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=1)
         # return np.concatenate((opt_flow_x, opt_flow_y),axis=1)
         # (frames-1, 34, 270, 480)
+    
+    def adjusting_frame(self, origin_keypoint):
+        if len(origin_keypoint) == 33:
+            return origin_keypoint
+        
+        elif len(origin_keypoint) > 33:
+            uniform_num = np.random.uniform(0, len(origin_keypoint), 33)
+            uniform_origin_keypoint = [origin_keypoint[int(i)] for i in uniform_num]
+            return np.array(uniform_origin_keypoint)
+
+        elif len(origin_keypoint) < 33:
+            num_repet = math.ceil((33 - len(origin_keypoint)) / len(origin_keypoint) + 1)
+            extended_origin = []
+            for i in range(num_repet):
+                if i % 2 == 0:
+                    tmp_origin = origin_keypoint
+                elif i % 2 == 1:
+                    tmp_origin = origin_keypoint[::-1]
+                extended_origin.append(tmp_origin)
+            extended_origin = np.array(extended_origin).reshape(-1,17,2)[0:33]
+            return extended_origin
 
     def expanding_sp_dataset(self, sp_keypoints):
         # 프레임이 가장 많은 개수 찾기
@@ -364,8 +386,9 @@ class MyDataset(Dataset):
         sp_10 = self.semi_positives_maker() # (10*frames,17,2)
         sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
-        heatmaps = self.compute_heatmap(origin_anchor_keypoints)
-        optical_flow = self.compute_optical_flow(origin_anchor_keypoints, heatmaps)
+        adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
+        heatmaps = self.compute_heatmap(adjusted_keypoints)
+        optical_flow = self.compute_optical_flow(adjusted_keypoints, heatmaps)
 
         reshape_sp_10_keypoints = []
         for i in range(len(sp_10_keypoints)):
@@ -403,7 +426,8 @@ class MyDataset(Dataset):
         
         input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, 17, 270, 480)
         input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 34, 270, 480)
-        input_data['origin'] = torch.tensor(origin_anchor_keypoints, dtype=torch.float32)
+        # input_data['origin'] = torch.tensor(origin_anchor_keypoints, dtype=torch.float32)
+        # input_data['origin'] = origin_anchor_keypoints
     
         return input_data
 
