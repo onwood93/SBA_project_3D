@@ -54,13 +54,13 @@ def load_data_dir(data_dir):
 
 # 컨피던스 정보 확인해야 함
 class MyDataset(Dataset):
-    def __init__(self, data_dir='', num_semi_positives=10, return_heatmap=False):
+    def __init__(self, data_dir='', num_semi_positives=10):
         super().__init__()
         self.h = config.H
         self.w = config.W
         self.data_dir = data_dir
         self.num_semi_positives = num_semi_positives
-        self.return_heatmap = return_heatmap
+        # self.return_heatmap = return_heatmap
 
         # 데이터 경로 전체 리스트 & action별 정리된 딕셔너리
         self.all_data_n_action_dir = load_data_dir(self.data_dir)
@@ -156,9 +156,9 @@ class MyDataset(Dataset):
     def add_aug_to_anchor(self, anchor_keypoints, aug_range=[-0.05, 0.05], augmentation=True):
         aug = np.random.uniform(aug_range[0], aug_range[1], size=anchor_keypoints.shape)
         aug_keypoints = anchor_keypoints + aug
-        aug_keypoints_list = self.compute_body_parts(aug_keypoints)
+        # aug_keypoints_list = self.compute_body_parts(aug_keypoints)
 
-        return aug_keypoints_list
+        return aug_keypoints
 
     def compute_heatmap(self, keypoints, std=5, rate=0.25):
         points = keypoints.reshape(-1,2)
@@ -323,15 +323,16 @@ class MyDataset(Dataset):
                 a_semi_positive_keypoints = json.load(f)
 
             a_semi_positive_keypoints_anno = a_semi_positive_keypoints['annotations']
-
-            sp_a_keypoint=[]
+            sp_a_keypoints=[]
             for i in range(len(a_semi_positive_keypoints_anno)):
                 if len(a_semi_positive_keypoints_anno[i]) == 1:
-                    sp_a_keypoint.append(a_semi_positive_keypoints_anno[i]["0"])
+                    sp_a_keypoints.append(a_semi_positive_keypoints_anno[i]["0"])
             
-            sp_keypoints.append(sp_a_keypoint)
+            sp_keypoints.append(sp_a_keypoints)
         
-        increased_sp_keypoints = self.expanding_sp_dataset(sp_keypoints=sp_keypoints)
+        adjusted_sp_keypoints = []
+        for i in range(len(sp_keypoints)):
+            adjusted_sp_keypoints.append(self.adjusting_frame(np.array(sp_keypoints[i])[:,:,[0,1]]))
 
         # tmp_list = []
         # increased_tmp_list=[]
@@ -340,7 +341,9 @@ class MyDataset(Dataset):
         #     increased_tmp_list.append(len(increased_sp_keypoints[i]))
         # print(tmp_list, increased_tmp_list)
 
-        return np.array(increased_sp_keypoints)[:,:,:,[0,1]].reshape(-1,17,2)
+        # return np.array(sp_keypoints)[:,:,[0,1]].reshape(-1,17,2)
+
+        return np.array(adjusted_sp_keypoints)
 
     def __getitem__(self, index):
         """
@@ -378,55 +381,58 @@ class MyDataset(Dataset):
         input_data = {}
         # 위의 형식대로 input_data에 집어넣기?
         origin_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir)
-        anchor_keypoints = self.compute_body_parts(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
+        # anchor_keypoints = self.compute_body_parts(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
 
-        # aug_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir) # (frames, 17, 2)
-        aug_keypoints = self.add_aug_to_anchor(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
+        # # aug_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir) # (frames, 17, 2)
+        # aug_keypoints = self.add_aug_to_anchor(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
 
-        sp_10 = self.semi_positives_maker() # (10*frames,17,2)
-        sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
+        # sp_10 = self.semi_positives_maker() # (10*frames,17,2)
+        # sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
         adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
+        aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints) # 5 * (frames, 12 or 4)
+        sp_10 = self.semi_positives_maker()
         heatmaps = self.compute_heatmap(adjusted_keypoints)
         optical_flow = self.compute_optical_flow(adjusted_keypoints, heatmaps)
 
-        reshape_sp_10_keypoints = []
-        for i in range(len(sp_10_keypoints)):
-            if i == 0:
-                # print(sp_10_keypoints[i].shape)
-                reshape_sp_10_keypoints.append(sp_10_keypoints[i].reshape(self.num_semi_positives,-1,12))
-                #(num_semi_positives, frames, 12)
-                # print(reshape_sp_10_keypoints[i].shape)
-            else:
-                # print(sp_10_keypoints[i].shape)
-                reshape_sp_10_keypoints.append(sp_10_keypoints[i].reshape(self.num_semi_positives,-1,4))
-                #(num_semi_positives, frames, 4)
-                # print(reshape_sp_10_keypoints[i].shape)
+        # reshape_sp_10_keypoints = []
+        # for i in range(len(sp_10_keypoints)):
+        #     if i == 0:
+        #         # print(sp_10_keypoints[i].shape)
+        #         reshape_sp_10_keypoints.append(sp_10_keypoints[i].reshape(self.num_semi_positives,-1,12))
+        #         #(num_semi_positives, frames, 12)
+        #         # print(reshape_sp_10_keypoints[i].shape)
+        #     else:
+        #         # print(sp_10_keypoints[i].shape)
+        #         reshape_sp_10_keypoints.append(sp_10_keypoints[i].reshape(self.num_semi_positives,-1,4))
+        #         #(num_semi_positives, frames, 4)
+        #         # print(reshape_sp_10_keypoints[i].shape)
 
-        # if self.return_heatmap is True:
-        #     heatmap_anchor = self.compute_heatmap(origin_anchor_keypoints)
-        #     heatmap_anchor_pos = self.compute_heatmap(??)
-        #     heatmap_anchor_sp = self.compute_heatmap(??)
+        # # if self.return_heatmap is True:
+        # #     heatmap_anchor = self.compute_heatmap(origin_anchor_keypoints)
+        # #     heatmap_anchor_pos = self.compute_heatmap(??)
+        # #     heatmap_anchor_sp = self.compute_heatmap(??)
            
-        # c0~4까지 넘파이 형식으로 바꿔서 넣어줘야 함 anchor_keypoints[0].shape
-        # anchor_keypoints, aug_keypoints 둘 다
-        # print("0번: ", reshape_sp_10_keypoints[0].shape)
-        # print("1번: ", reshape_sp_10_keypoints[1].shape)
-        # print("2번: ", reshape_sp_10_keypoints[2].shape)
-        # print("3번: ", reshape_sp_10_keypoints[3].shape)
-        # print("4번: ", reshape_sp_10_keypoints[4].shape)
+        # # c0~4까지 넘파이 형식으로 바꿔서 넣어줘야 함 anchor_keypoints[0].shape
+        # # anchor_keypoints, aug_keypoints 둘 다
+        # # print("0번: ", reshape_sp_10_keypoints[0].shape)
+        # # print("1번: ", reshape_sp_10_keypoints[1].shape)
+        # # print("2번: ", reshape_sp_10_keypoints[2].shape)
+        # # print("3번: ", reshape_sp_10_keypoints[3].shape)
+        # # print("4번: ", reshape_sp_10_keypoints[4].shape)
 
-        for i in range(len(anchor_keypoints)):
-            anchor_key = 'anchor_c' + str(i)
-            aug_key = 'anchor_aug_c' + str(i)
-            semi_key = 'semi_positives_c' + str(i)
-            input_data[anchor_key] = torch.tensor(anchor_keypoints[i], dtype=torch.float32)
-            input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
-            input_data[semi_key] = torch.tensor(reshape_sp_10_keypoints[i], dtype=torch.float32)
-        
-        input_data['heatmap'] = torch.tensor(heatmaps, dtype=torch.float32) # (frames, 17, 270, 480)
+        # for i in range(len(origin_anchor_keypoints)):
+        #     anchor_key = 'anchor_c' + str(i)
+        #     aug_key = 'anchor_aug_c' + str(i)
+        #     semi_key = 'semi_positives_c' + str(i)
+        #     input_data[anchor_key] = torch.tensor(origin_anchor_keypoints[i], dtype=torch.float32)
+        #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
+        #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
+        input_data['origin'] = torch.tensor(adjusted_keypoints, dtype=torch.float32) # (33, 17, 2)
+        input_data['augmentation'] = torch.tensor(aug_keypoints, dtype=torch.float32) # (33, 17, 2)
+        input_data['semi_positives'] = torch.tensor(sp_10, dtype=torch.float32) # (num_semi_positives, 33, 17, 2)
+        input_data['heatmap'] = torch.tensor(heatmaps[1:], dtype=torch.float32) # (frames, 17, 270, 480)
         input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 34, 270, 480)
-        # input_data['origin'] = torch.tensor(origin_anchor_keypoints, dtype=torch.float32)
         # input_data['origin'] = origin_anchor_keypoints
     
         return input_data
