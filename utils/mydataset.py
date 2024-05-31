@@ -228,7 +228,7 @@ class MyDataset(Dataset):
             return origin_keypoint
         
         elif len(origin_keypoint) > 33:
-            uniform_num = np.random.uniform(0, len(origin_keypoint), 33)
+            uniform_num = np.random.uniform(0, len(origin_keypoint), 33)# 적어도 sorting해줄 것 / interpolation or np.linspace로 추출하는 방법 권장
             uniform_origin_keypoint = [origin_keypoint[int(i)] for i in uniform_num]
             return np.array(uniform_origin_keypoint)
 
@@ -345,6 +345,10 @@ class MyDataset(Dataset):
 
         return np.array(adjusted_sp_keypoints)
 
+    def crop_keypoints(self, keypoints, heatmaps, flows):
+
+        return None
+
     def __getitem__(self, index):
         """
         index 번째 데이터 가져오고 augmentation 해서 anchor, anchor_aug, semi_positives들 만드는 코드
@@ -390,10 +394,20 @@ class MyDataset(Dataset):
         # sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
         adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
-        aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints) # 5 * (frames, 12 or 4)
+        origin_heatmaps = self.compute_heatmap(adjusted_keypoints)
+        origin_flow = self.compute_optical_flow(adjusted_keypoints, origin_heatmaps)
+
+        aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints)
+        aug_heatmaps = self.compute_heatmap(aug_keypoints)
+        aug_flow = self.compute_optical_flow(aug_keypoints, aug_heatmaps)
+
         sp_10 = self.semi_positives_maker()
-        heatmaps = self.compute_heatmap(adjusted_keypoints)
-        optical_flow = self.compute_optical_flow(adjusted_keypoints, heatmaps)
+        sp_heatmaps = []
+        sp_flow = []
+        for sp_1 in sp_10:
+            sp_heatmap = self.compute_heatmap(sp_1)
+            sp_heatmaps.append(sp_heatmap)
+            sp_flow.append(self.compute_optical_flow(sp_1, sp_heatmap))
 
         # reshape_sp_10_keypoints = []
         # for i in range(len(sp_10_keypoints)):
@@ -428,11 +442,18 @@ class MyDataset(Dataset):
         #     input_data[anchor_key] = torch.tensor(origin_anchor_keypoints[i], dtype=torch.float32)
         #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
         #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
-        input_data['origin'] = torch.tensor(adjusted_keypoints, dtype=torch.float32) # (33, 17, 2)
-        input_data['augmentation'] = torch.tensor(aug_keypoints, dtype=torch.float32) # (33, 17, 2)
-        input_data['semi_positives'] = torch.tensor(sp_10, dtype=torch.float32) # (num_semi_positives, 33, 17, 2)
-        input_data['heatmap'] = torch.tensor(heatmaps[1:], dtype=torch.float32) # (frames, 17, 270, 480)
-        input_data['optical_flow'] = torch.tensor(optical_flow, dtype=torch.float32) # (frames, 34, 270, 480)
+        input_data['origin'] = torch.tensor(adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['origin_heatmap'] = torch.tensor(origin_heatmaps[1:], dtype=torch.float32) # (32, 17, 270, 480)
+        input_data['origin_flow'] = torch.tensor(origin_flow, dtype=torch.float32) # (32, 34, 270, 480)
+
+        input_data['augmentation'] = torch.tensor(aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['aug_heatmap'] = torch.tensor(aug_heatmaps[1:], dtype=torch.float32) # (32, 17, 270, 480)
+        input_data['aug_flow'] = torch.tensor(aug_flow, dtype=torch.float32) # (32, 17, 270, 480)
+
+        input_data['semi_positives'] = torch.tensor(sp_10[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
+        input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
+        input_data['sp_flow'] = torch.tensor(np.array(sp_flow), dtype=torch.float32) # (num_semi_positivest, 32, 34, 270, 480)
+
         # input_data['origin'] = origin_anchor_keypoints
     
         return input_data
