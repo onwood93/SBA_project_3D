@@ -50,11 +50,15 @@ class Encoder(nn.Module):
         
     def forward(self, h_feat, f_feat):
         h_feat = self.h_seq(h_feat.reshape(-1,17,cf.H,cf.W))
-        f_feat = self.f_seq(f_feat.reshape(-1,17,cf.H,cf.W))
-        
-        hf_feat = torch.cat((h_feat, f_feat), dim=1).transpose(1,0).reshape(6,cf.batch,32,cf.H,cf.W)
+        print("h_feat: ", h_feat.shape)
+        f_feat = self.f_seq(f_feat.reshape(-1,34,cf.H,cf.W))
+        print("f_feat: ", f_feat.shape)
 
+        hf_feat = torch.cat((h_feat, f_feat), dim=1).reshape(cf.batch, 32, 6, 125, 230).transpose(2,1)
+        print("hf_feat: ", hf_feat.shape)
+    
         motion_feature = self.seq_3D(hf_feat).reshape(cf.batch,32,-1)
+
         motion_feature = self.lin_seq(motion_feature)
 
         return motion_feature

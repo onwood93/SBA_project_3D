@@ -7,6 +7,7 @@ import pathlib
 import torch
 from torch.utils.data import Dataset
 import utils.Configs as config
+import torchvision.transforms.functional as ttF
 
 # def load_data_dir(data_dir):
 #     all_data_dir_list = []
@@ -161,7 +162,7 @@ class MyDataset(Dataset):
         return aug_keypoints
 
     def compute_heatmap(self, keypoints, std=5, rate=0.25):
-        points = keypoints.reshape(-1,2)
+        points = keypoints.reshape(-1,2) * rate
 
         x_points = points[:,[0]]
         y_points = points[:,[1]]
@@ -175,8 +176,8 @@ class MyDataset(Dataset):
 
         heatmap_list = []
         for i in range(len(x_points)):
-            x = x_points[i] * rate
-            y = y_points[i] * rate
+            x = x_points[i]
+            y = y_points[i]
             # x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2)
             # y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
             y_gauss = np.exp(-0.5*((H-x)/std)**2)
@@ -346,8 +347,21 @@ class MyDataset(Dataset):
         return np.array(adjusted_sp_keypoints)
 
     def crop_keypoints(self, keypoints, heatmaps, flows):
+        tmp_origin = keypoints * 0.25
+        origin_x_max = int(np.max(tmp_origin[:,:,0]))
+        origin_y_max = int(np.max(tmp_origin[:,:,1]))
+        origin_x_min = int(np.min(tmp_origin[:,:,0]))
+        origin_y_min = int(np.min(tmp_origin[:,:,1]))
 
-        return None
+        margin = 25
+
+        crop_heatmap = torch.tensor(heatmaps[:,:,origin_x_min-margin:origin_x_max+margin,origin_y_min-margin:origin_y_max+margin], dtype=torch.float32)
+        resized_crop_heatmap = ttF.resize(crop_heatmap, (200,100))
+
+        crop_flow = torch.tensor(flows[:,:,origin_x_min-margin:origin_x_max+margin,origin_y_min-margin:origin_y_max+margin], dtype=torch.float32)
+        resized_crop_flow = ttF.resize(crop_flow, (200,100))
+
+        return resized_crop_heatmap, resized_crop_flow
 
     def __getitem__(self, index):
         """
@@ -396,18 +410,26 @@ class MyDataset(Dataset):
         adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
         origin_heatmaps = self.compute_heatmap(adjusted_keypoints)
         origin_flow = self.compute_optical_flow(adjusted_keypoints, origin_heatmaps)
+        resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(adjusted_keypoints, origin_heatmaps, origin_flow)
 
         aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints)
         aug_heatmaps = self.compute_heatmap(aug_keypoints)
         aug_flow = self.compute_optical_flow(aug_keypoints, aug_heatmaps)
+        resized_aug_heatmap, resized_aug_flow = self.crop_keypoints(aug_keypoints, aug_heatmaps, aug_flow)
 
         sp_10 = self.semi_positives_maker()
         sp_heatmaps = []
         sp_flow = []
         for sp_1 in sp_10:
-            sp_heatmap = self.compute_heatmap(sp_1)
-            sp_heatmaps.append(sp_heatmap)
-            sp_flow.append(self.compute_optical_flow(sp_1, sp_heatmap))
+            tmp_sp_heatmap = self.compute_heatmap(sp_1)
+            tmp_sp_flow = self.compute_optical_flow(sp_1, tmp_sp_heatmap)
+            tmp_resized_sp_heatmap, tmp_resized_sp_flow = self.crop_keypoints(sp_1, tmp_sp_heatmap, tmp_sp_flow)
+            sp_heatmaps.append(tmp_resized_sp_heatmap)
+            sp_flow.append(tmp_resized_sp_flow)
+
+        adjusted_keypoints = adjusted_keypoints / adjusted_keypoints.max()
+        aug_keypoints = aug_keypoints / aug_keypoints.max()
+        sp_10 = sp_10 / sp_10.max()
 
         # reshape_sp_10_keypoints = []
         # for i in range(len(sp_10_keypoints)):
@@ -443,17 +465,18 @@ class MyDataset(Dataset):
         #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
         #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
         input_data['origin'] = torch.tensor(adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
-        input_data['origin_heatmap'] = torch.tensor(origin_heatmaps[1:], dtype=torch.float32) # (32, 17, 270, 480)
-        input_data['origin_flow'] = torch.tensor(origin_flow, dtype=torch.float32) # (32, 34, 270, 480)
+        input_data['origin_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
+        input_data['origin_flow'] = resized_origin_flow # (32, 34, 200, 100)
 
         input_data['augmentation'] = torch.tensor(aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
-        input_data['aug_heatmap'] = torch.tensor(aug_heatmaps[1:], dtype=torch.float32) # (32, 17, 270, 480)
-        input_data['aug_flow'] = torch.tensor(aug_flow, dtype=torch.float32) # (32, 17, 270, 480)
+        input_data['aug_heatmap'] = resized_aug_heatmap[1:] # (32, 17, 200, 100)
+        input_data['aug_flow'] = resized_aug_flow # (32, 17, 200, 100)
 
         input_data['semi_positives'] = torch.tensor(sp_10[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
-        input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
+        input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
         input_data['sp_flow'] = torch.tensor(np.array(sp_flow), dtype=torch.float32) # (num_semi_positivest, 32, 34, 270, 480)
 
+        input_data['class'] = self.action
         # input_data['origin'] = origin_anchor_keypoints
     
         return input_data
