@@ -67,6 +67,7 @@ class MyDataset(Dataset):
         self.all_data_n_action_dir = load_data_dir(self.data_dir)
         self.all_data_dir_list = self.all_data_n_action_dir[0]
         self.action_dir_dic = self.all_data_n_action_dir[1]
+        # print("class_num: ", len(self.action_dir_dic.keys()))
 
     def __len__(self):
         return len(self.all_data_dir_list)
@@ -464,9 +465,9 @@ class MyDataset(Dataset):
         #     input_data[anchor_key] = torch.tensor(origin_anchor_keypoints[i], dtype=torch.float32)
         #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
         #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
-        input_data['origin'] = torch.tensor(adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
-        input_data['origin_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
-        input_data['origin_flow'] = resized_origin_flow # (32, 34, 200, 100)
+        input_data['anchor'] = torch.tensor(adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['anchor_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
+        input_data['anchor_flow'] = resized_origin_flow # (32, 34, 200, 100)
 
         input_data['augmentation'] = torch.tensor(aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
         input_data['aug_heatmap'] = resized_aug_heatmap[1:] # (32, 17, 200, 100)

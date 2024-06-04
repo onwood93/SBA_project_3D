@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from copy import deepcopy
-import utils.Configs as cf
 
 # 프레임 개수 고정(32개, uniform하게 33장 추출), mydataset에서 코드 추가 작성 필요, interpolation
 # gpu에 올려서 샘플 동시에 몇 개까지 가능한지 확인(최소 5개는 되면 좋겠음)
@@ -44,22 +43,32 @@ class Encoder(nn.Module):
                                      nn.BatchNorm3d(24),
                                      nn.Conv3d(24,32,kernel_size=3))
 
-        self.lin_seq = nn.Sequential(nn.Linear(38000, 512),
+        self.lin_seq = nn.Sequential(nn.Linear(1200, 512),
                                      nn.ReLU(),
                                      nn.Linear(512,128))
         
     def forward(self, h_feat, f_feat):
-        h_feat = self.h_seq(h_feat.reshape(-1,17,cf.H,cf.W))
+        if len(h_feat.shape)==6:
+            num_semi = h_feat.shape[1]
+        else:
+            num_semi = 1
+        batch = h_feat.shape[0]
+        H = h_feat.shape[-2]
+        W = h_feat.shape[-1]
+        print(batch, H, W)
+        h_feat = self.h_seq(h_feat.reshape(-1,17,H,W))
         print("h_feat: ", h_feat.shape)
-        f_feat = self.f_seq(f_feat.reshape(-1,34,cf.H,cf.W))
+        f_feat = self.f_seq(f_feat.reshape(-1,34,H,W))
         print("f_feat: ", f_feat.shape)
 
-        hf_feat = torch.cat((h_feat, f_feat), dim=1).reshape(cf.batch, 32, 6, 125, 230).transpose(2,1)
+        hf_feat = torch.cat((h_feat, f_feat), dim=1).reshape(batch*num_semi, 32, 6, 90, 40).transpose(2,1)
         print("hf_feat: ", hf_feat.shape)
     
-        motion_feature = self.seq_3D(hf_feat).reshape(cf.batch,32,-1)
+        motion_feature = self.seq_3D(hf_feat).reshape(batch*num_semi,32,-1)
+        print("motion_feat_3D: ", motion_feature.shape)
 
         motion_feature = self.lin_seq(motion_feature)
+        print("motion_feat_linear: ", motion_feature.shape)
 
         return motion_feature
 
@@ -82,9 +91,11 @@ class Decoder(nn.Module):
 
     # forward도 수정 필요
     def forward(self, x):
+        batch = x.shape[0]
         x = self.linears(x)
+        print("decoder: ", x.shape)
 
-        return x.reshape(cf.batch,32,17,2)
+        return x.reshape(batch,32,17,2)
 
 # class heatmap_Encoder(nn.Module):
 #     def __init__(self):
