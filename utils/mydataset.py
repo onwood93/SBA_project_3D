@@ -184,7 +184,7 @@ class MyDataset(Dataset):
             y_gauss = np.exp(-0.5*((H-x)/std)**2)
             x_gauss = np.exp(-0.5*((W-y)/std)**2)
             frame = (x_gauss * y_gauss)
-            frame = frame / frame.max()
+            frame = (frame / frame.max()) * 2 - 1
             heatmap_list.append(frame)
         heatmaps = np.array(heatmap_list).reshape(-1, 17, self.h, self.w)
 
@@ -213,8 +213,8 @@ class MyDataset(Dataset):
         for i in range(1,len(heatmaps)):
             heatmap = heatmaps[i]
             for j in range(len(heatmap)):
-                tmp_x = hw_zeros + flow_x[i-1][j]
-                tmp_y = hw_zeros + flow_y[i-1][j]
+                tmp_x = ((hw_zeros + flow_x[i-1][j]) / 270) * 2 - 1
+                tmp_y = ((hw_zeros + flow_y[i-1][j]) / 480) * 2 - 1
                 opt_flow_x.append(tmp_x * heatmap[j])
                 opt_flow_y.append(tmp_y * heatmap[j])
 
@@ -363,6 +363,16 @@ class MyDataset(Dataset):
         resized_crop_flow = ttF.resize(crop_flow, (200,100))
 
         return resized_crop_heatmap, resized_crop_flow
+    
+    def keypoints_normalize(self, keypoints):
+        if len(keypoints) == 4:
+            normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
+        else:
+            print(keypoints[:,:,[0]].shape)
+            normalized_keypoints = np.concatenate([(keypoints[:,:,[0]]/1080)*2-1, (keypoints[:,:,[1]]/1920)*2-1], axis = 2)
+
+        return normalized_keypoints
+
 
     def __getitem__(self, index):
         """
@@ -419,6 +429,7 @@ class MyDataset(Dataset):
         resized_aug_heatmap, resized_aug_flow = self.crop_keypoints(aug_keypoints, aug_heatmaps, aug_flow)
 
         sp_10 = self.semi_positives_maker()
+
         sp_heatmaps = []
         sp_flow = []
         for sp_1 in sp_10:
@@ -428,9 +439,11 @@ class MyDataset(Dataset):
             sp_heatmaps.append(tmp_resized_sp_heatmap)
             sp_flow.append(tmp_resized_sp_flow)
 
-        adjusted_keypoints = adjusted_keypoints / adjusted_keypoints.max()
-        aug_keypoints = aug_keypoints / aug_keypoints.max()
-        sp_10 = sp_10 / sp_10.max()
+        norm_adjusted_keypoints = self.keypoints_normalize(adjusted_keypoints)
+        norm_aug_keypoints = self.keypoints_normalize(aug_keypoints)
+        norm_sp_10_keypoints = self.keypoints_normalize(sp_10)
+        print(sp_10.shape)
+        print(norm_sp_10_keypoints.shape)
 
         # reshape_sp_10_keypoints = []
         # for i in range(len(sp_10_keypoints)):
@@ -465,15 +478,15 @@ class MyDataset(Dataset):
         #     input_data[anchor_key] = torch.tensor(origin_anchor_keypoints[i], dtype=torch.float32)
         #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
         #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
-        input_data['anchor'] = torch.tensor(adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['anchor'] = torch.tensor(norm_adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
         input_data['anchor_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
         input_data['anchor_flow'] = resized_origin_flow # (32, 34, 200, 100)
 
-        input_data['augmentation'] = torch.tensor(aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['augmentation'] = torch.tensor(norm_aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
         input_data['aug_heatmap'] = resized_aug_heatmap[1:] # (32, 17, 200, 100)
         input_data['aug_flow'] = resized_aug_flow # (32, 17, 200, 100)
 
-        input_data['semi_positives'] = torch.tensor(sp_10[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
+        input_data['semi_positives'] = torch.tensor(norm_sp_10_keypoints[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
         input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
         input_data['sp_flow'] = torch.tensor(np.array(sp_flow), dtype=torch.float32) # (num_semi_positivest, 32, 34, 270, 480)
 
