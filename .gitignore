@@ -1,0 +1,9 @@
+data
+dataset
+error_data
+tests
+이상한키포인트.txt
+트레이닝결과에러.txt
+cifar10_tutorial.ipynb
+mydataset_input_size.txt
+tensorboard_test.py
