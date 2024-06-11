@@ -13,29 +13,36 @@ def main():
     device = "cuda:3" if torch.cuda.is_available() else "cpu"
     # device = 'cpu'
     #model, batch, label 부분에 to device 붙이기
-    data_dir = 'dataset'
+    data_dir = 'adjusted_dataset'
     batch = 12
+    start_time = time.time()
     dataset = MyDataset(data_dir, 1)
-    train_loader = DataLoader(dataset, batch, shuffle=False, num_workers=8)
-
-    train_len = len(train_loader)
+    train_loader = DataLoader(dataset, batch, shuffle=True, num_workers=8)
+    end_time = time.time()
+    print(end_time-start_time)
+    # train_len = len(train_loader)
 
     encoder = Encoder().to(device)
     decoder = Decoder().to(device)
     mse = nn.MSELoss()
     cE = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam([{'params':encoder.parameters(),'lr':0.001},
-                                {'params':decoder.parameters(),'lr':0.001}])
+    # optimizer = torch.optim.Adam([{'params':encoder.parameters(),'lr':0.001},
+    #                             {'params':decoder.parameters(),'lr':0.001}])
+    optimizer = torch.optim.Adam([
+        *encoder.parameters(),
+        *decoder.parameters()
+    ], lr=0.001)
     
     for epoch in range(100):  # loop over the dataset multiple times
 
-        running_loss = 0.0
+        # running_loss = 0.0
         total_loss = 0.0
         total_mse_loss = 0.0
         total_cE_loss = 0.0
 
         for i, train_item in enumerate(tqdm(train_loader, 0)):
             # get the inputs; data is a list of [inputs, labels]
+            print('speed_test')
             anchor = train_item['anchor'].to(device)
             h_input = train_item['anchor_heatmap'].to(device)
             f_input = train_item['anchor_flow'].to(device)
@@ -62,16 +69,22 @@ def main():
             total_mse_loss += mse_loss
             total_cE_loss += cE_loss
             total_loss += loss
-
+            
             # print statistics
-            running_loss += loss.item()
-            if i % 2000 == 1999:    # print every 2000 mini-batches
-                print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 2000:.3f}')
-                running_loss = 0.0
+            # running_loss += loss.item()
+            if i % 100 == 99:    # print every 100 mini-batches
+                # print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f}')
+                # running_loss = 0.0
 
-        writer.add_scalar("Loss/train_total_loss", total_loss/train_len , epoch)
-        writer.add_scalar("Loss/train_mse_loss", total_mse_loss/train_len, epoch)
-        writer.add_scalar("Loss/train_cE_loss", total_cE_loss/train_len, epoch)
+                writer.add_scalar("Loss/train_total_loss", total_loss/100 , i)
+                writer.add_scalar("Loss/train_mse_loss", total_mse_loss/100, i)
+                writer.add_scalar("Loss/train_cE_loss", total_cE_loss/100, i)
+
+                total_loss = 0.0
+                total_mse_loss = 0.0
+                total_cE_loss = 0.0
+
+
         print('end of epoch', epoch)
         # writer.add_scalar("total_Loss/train", total_loss, epoch)
         # writer.add_scalar("total_mse_Loss/train", total_mse_loss, epoch)
