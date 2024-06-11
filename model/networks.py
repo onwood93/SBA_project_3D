@@ -45,8 +45,16 @@ class Encoder(nn.Module):
 
         self.lin_seq = nn.Sequential(nn.Linear(1200, 512),
                                      nn.ReLU(),
-                                     nn.Linear(512,128))
+                                     nn.Linear(512,128),
+                                     nn.ReLU(),
+                                     nn.Linear(128,73))
         
+    #     self.lin_for_cE = nn.Linear(128,73)
+        
+    # def for_cE(self, input):
+    #     output = self.lin_for_cE(input)
+    #     return output
+    
     def forward(self, h_feat, f_feat):
         if len(h_feat.shape)==6:
             num_semi = h_feat.shape[1]
@@ -55,20 +63,20 @@ class Encoder(nn.Module):
         batch = h_feat.shape[0]
         H = h_feat.shape[-2]
         W = h_feat.shape[-1]
-        print(batch, H, W)
+        # print(batch, H, W)
         h_feat = self.h_seq(h_feat.reshape(-1,17,H,W))
-        print("h_feat: ", h_feat.shape)
+        # print("h_feat: ", h_feat.shape)
         f_feat = self.f_seq(f_feat.reshape(-1,34,H,W))
-        print("f_feat: ", f_feat.shape)
+        # print("f_feat: ", f_feat.shape)
 
         hf_feat = torch.cat((h_feat, f_feat), dim=1).reshape(batch*num_semi, 32, 6, 90, 40).transpose(2,1)
-        print("hf_feat: ", hf_feat.shape)
+        # print("hf_feat: ", hf_feat.shape)
     
         motion_feature = self.seq_3D(hf_feat).reshape(batch*num_semi,32,-1)
-        print("motion_feat_3D: ", motion_feature.shape)
+        # print("motion_feat_3D: ", motion_feature.shape)
 
         motion_feature = self.lin_seq(motion_feature)
-        print("motion_feat_linear: ", motion_feature.shape)
+        # print("motion_feat_linear: ", motion_feature.shape)
 
         return motion_feature
 
@@ -84,7 +92,7 @@ class Decoder(nn.Module):
         # self.linears_1 = nn.Linear(128, 32 * 17)
         # self.linears_2 = nn.Linear(32, 2 * 17)
 
-        self.linears = nn.Sequential(nn.Linear(128, 32 * 17),
+        self.linears = nn.Sequential(nn.Linear(73, 32 * 17),
                                      nn.ReLU(),
                                      nn.Linear(32 * 17, 2 * 17))
         # 1번은 분해하는 역할 2번은 압축시켜주는 역할
@@ -93,7 +101,7 @@ class Decoder(nn.Module):
     def forward(self, x):
         batch = x.shape[0]
         x = self.linears(x)
-        print("decoder: ", x.shape)
+        # print("decoder: ", x.shape)
 
         return x.reshape(batch,32,17,2)
 
