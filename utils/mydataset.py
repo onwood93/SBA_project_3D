@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 import utils.Configs as config
 import torchvision.transforms.functional as ttF
+import tqdm
 
 # def load_data_dir(data_dir):
 #     all_data_dir_list = []
@@ -54,7 +55,7 @@ def load_data_dir(data_dir):
     #                 else:
     #                     action_dir_dic[action] = [whole_file_path]
 
-    return all_data_dir_list, action_dir_dic, label_dic
+    return all_data_dir_list[:1000], action_dir_dic, label_dic
 
 
 # 컨피던스 정보 확인해야 함
@@ -171,6 +172,30 @@ class MyDataset(Dataset):
         return aug_keypoints
 
     def compute_heatmap(self, keypoints, std=5, rate=0.25):
+        # h = 270
+        # w = 480
+        # points = keypoints.reshape(-1, 2) * rate
+
+        # y_points = keypoints[:, :, 0].reshape(-1, 1, 1, 1) * rate
+        # x_points = keypoints[:, :, 1].reshape(-1, 1, 1, 1) * rate
+
+        # H = np.arange(self.h).reshape(self.h, 1, 1)
+        # W = np.arange(self.w).reshape(1, self.w, 1)
+
+        # y_gauss = np.exp(-0.5 * ((H - y_points) / std) ** 2)
+        # x_gauss = np.exp(-0.5 * ((W - x_points) / std) ** 2)
+
+        # frames = y_gauss * x_gauss
+
+        # # 최대값이 0인 경우를 방지하기 위해 최소값을 설정
+        # max_values = frames.max(axis=(0, 1), keepdims=True)
+        # max_values[max_values == 0] = 1
+
+        # frames = (frames / max_values) * 2 - 1
+
+        # heatmaps = frames.reshape(-1, 17, self.h, self.w)
+
+        #-----------------------------------------------
         points = keypoints.reshape(-1,2) * rate
 
         x_points = points[:,[0]]
@@ -414,28 +439,36 @@ class MyDataset(Dataset):
         # print(origin_x_max, origin_x_min, origin_y_max, origin_y_min)
 
         margin = 25
+        x_min_margin = max(origin_x_min-margin, 0)
+        y_min_margin = max(origin_y_min-margin, 0)
         # min - margin > 0 처리하면 될 것 같음
-        crop_heatmap = torch.tensor(heatmaps[:,:,max(origin_x_min-margin, 0):origin_x_max+margin,max(origin_y_min-margin, 0):origin_y_max+margin], dtype=torch.float32)
+        crop_heatmap = torch.tensor(heatmaps[:,:,x_min_margin:origin_x_max+margin,y_min_margin:origin_y_max+margin], dtype=torch.float32)
         resized_crop_heatmap = ttF.resize(crop_heatmap, (200,100))
 
         
-        crop_flow = torch.tensor(flows[:,:,max(origin_x_min-margin, 0):origin_x_max+margin,max(origin_y_min-margin,0):origin_y_max+margin], dtype=torch.float32)
+        crop_flow = torch.tensor(flows[:,:,x_min_margin:origin_x_max+margin,y_min_margin:origin_y_max+margin], dtype=torch.float32)
         resized_crop_flow = ttF.resize(crop_flow, (200,100))
 
         return resized_crop_heatmap, resized_crop_flow
     
     def keypoints_normalize(self, keypoints):
+
         if len(keypoints) == 4:
-            normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
+            keypoints[:,:,:,[0]] = (keypoints[:,:,:,[0]]/1080)*2-1
+            keypoints[:,:,:,[1]] = (keypoints[:,:,:,[1]]/1920)*2-1
+            # normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
+            
         else:
             # print(keypoints[:,:,[0]].shape)
-            normalized_keypoints = np.concatenate([(keypoints[:,:,[0]]/1080)*2-1, (keypoints[:,:,[1]]/1920)*2-1], axis = 2)
+            # normalized_keypoints = np.concatenate([(keypoints[:,:,[0]]/1080)*2-1, (keypoints[:,:,[1]]/1920)*2-1], axis = 2)
+            keypoints[:,:,[0]] = (keypoints[:,:,[0]]/1080)*2-1
+            keypoints[:,:,[1]] = (keypoints[:,:,[1]]/1920)*2-1
 
-        return normalized_keypoints
+        return keypoints
     
     def make_anchor_set(self, all_data_dir_list):
         anchor_set_list = []
-        for i in range(len(all_data_dir_list)):
+        for i in tqdm.tqdm(range(len(all_data_dir_list))):
             origin_anchor_keypoints = self.extract_adjusted_kps_from_a_json(all_data_dir_list[i])
             origin_heatmaps = self.compute_heatmap(origin_anchor_keypoints)
             origin_flow = self.compute_optical_flow(origin_anchor_keypoints, origin_heatmaps)
@@ -454,7 +487,7 @@ class MyDataset(Dataset):
 
         # 데이터 경로 전체 리스트 & action별 정리된 딕셔너리
         self.all_data_dir_list, self.action_dir_dic, self.label_dic = load_data_dir(self.data_dir)
-        self.anchor_set_list = self.make_anchor_set(self.all_data_dir_list)
+        # self.anchor_set_list = self.make_anchor_set(self.all_data_dir_list)
 
     def __len__(self):
         return len(self.all_data_dir_list)
@@ -490,16 +523,17 @@ class MyDataset(Dataset):
         # self.random_vid_dir = random.choice(self.all_data_dir_list)
 
         #------------------------------------------------------------------
-        # self.index_vid_dir = self.all_data_dir_list[index]
-        chosen_anchor = self.anchor_set_list[index]
+        self.index_vid_dir = self.all_data_dir_list[index]
+        # chosen_anchor = self.anchor_set_list[index]
         # chosen_anchor shape => [all_data_dir_list[i], norm_adjusted_keypoints[1:], resized_origin_heatmap[1:], resized_origin_flow]
-        key_fn = chosen_anchor[0].split('/')[-1].split('_')[0]
+        # key_fn = chosen_anchor[0].split('/')[-1].split('_')[0]
+        key_fn = self.index_vid_dir.split('/')[-1].split('_')[0]
         self.action = key_fn[key_fn.find('A'):]
 
         input_data = {}
         # 위의 형식대로 input_data에 집어넣기?
         #------------------------------------------------------------------
-        # origin_anchor_keypoints = self.extract_adjusted_kps_from_a_json(self.index_vid_dir)
+        origin_anchor_keypoints = self.extract_adjusted_kps_from_a_json(self.index_vid_dir)
         #------------------------------------------------------------------
 
         # anchor_keypoints = self.compute_body_parts(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
@@ -512,9 +546,9 @@ class MyDataset(Dataset):
 
         # adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
         #------------------------------------------------------------------
-        # origin_heatmaps = self.compute_heatmap(origin_anchor_keypoints)
-        # origin_flow = self.compute_optical_flow(origin_anchor_keypoints, origin_heatmaps)
-        # resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(origin_anchor_keypoints, origin_heatmaps, origin_flow)
+        origin_heatmaps = self.compute_heatmap(origin_anchor_keypoints)
+        origin_flow = self.compute_optical_flow(origin_anchor_keypoints, origin_heatmaps)
+        resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(origin_anchor_keypoints, origin_heatmaps, origin_flow)
          #------------------------------------------------------------------
        
         # aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints)
@@ -534,7 +568,7 @@ class MyDataset(Dataset):
         #     sp_flow.append(tmp_resized_sp_flow)
 
         #------------------------------------------------------------------
-        # norm_adjusted_keypoints = self.keypoints_normalize(origin_anchor_keypoints)
+        norm_adjusted_keypoints = self.keypoints_normalize(origin_anchor_keypoints)
         #------------------------------------------------------------------
 
         # norm_aug_keypoints = self.keypoints_normalize(aug_keypoints)
@@ -576,13 +610,13 @@ class MyDataset(Dataset):
         #     input_data[anchor_key] = torch.tensor(origin_anchor_keypoints[i], dtype=torch.float32)
         #     input_data[aug_key] = torch.tensor(aug_keypoints[i], dtype=torch.float32)
         #     input_data[semi_key] = torch.tensor(sp_10[i], dtype=torch.float32)
-        # input_data['anchor'] = torch.tensor(norm_adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
-        # input_data['anchor_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
-        # input_data['anchor_flow'] = resized_origin_flow # (32, 34, 200, 100)
+        input_data['anchor'] = torch.tensor(norm_adjusted_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
+        input_data['anchor_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
+        input_data['anchor_flow'] = resized_origin_flow # (32, 34, 200, 100)
 
-        input_data['anchor'] = torch.tensor(chosen_anchor[1], dtype=torch.float32) # (32, 17, 2)
-        input_data['anchor_heatmap'] = chosen_anchor[2] # (32, 17, 200, 100)
-        input_data['anchor_flow'] = chosen_anchor[3] # (32, 34, 200, 100)
+        # input_data['anchor'] = torch.tensor(chosen_anchor[1], dtype=torch.float32) # (32, 17, 2)
+        # input_data['anchor_heatmap'] = chosen_anchor[2] # (32, 17, 200, 100)
+        # input_data['anchor_flow'] = chosen_anchor[3] # (32, 34, 200, 100)
 
         # input_data['augmentation'] = torch.tensor(norm_aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
         # input_data['aug_heatmap'] = resized_aug_heatmap[1:] # (32, 17, 200, 100)

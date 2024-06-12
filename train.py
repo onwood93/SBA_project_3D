@@ -15,11 +15,11 @@ def main():
     #model, batch, label 부분에 to device 붙이기
     data_dir = 'adjusted_dataset'
     batch = 12
-    start_time = time.time()
+    # start_time = time.time()
     dataset = MyDataset(data_dir, 1)
-    train_loader = DataLoader(dataset, batch, shuffle=True, num_workers=8)
-    end_time = time.time()
-    print(end_time-start_time)
+    train_loader = DataLoader(dataset, batch, shuffle=False, num_workers=8)
+    # end_time = time.time()
+    # print(end_time-start_time)
     # train_len = len(train_loader)
 
     encoder = Encoder().to(device)
@@ -72,23 +72,23 @@ def main():
             
             # print statistics
             # running_loss += loss.item()
-            if i % 100 == 99:    # print every 100 mini-batches
-                # print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f}')
-                # running_loss = 0.0
+            # if i % 100 == 99:    # print every 100 mini-batches
+            #     # print(f'[{epoch + 1}, {i + 1:5d}] loss: {running_loss / 100:.3f}')
+            #     # running_loss = 0.0
 
-                writer.add_scalar("Loss/train_total_loss", total_loss/100 , i)
-                writer.add_scalar("Loss/train_mse_loss", total_mse_loss/100, i)
-                writer.add_scalar("Loss/train_cE_loss", total_cE_loss/100, i)
+            #     writer.add_scalar("Loss/train_total_loss", total_loss/100 , i)
+            #     writer.add_scalar("Loss/train_mse_loss", total_mse_loss/100, i)
+            #     writer.add_scalar("Loss/train_cE_loss", total_cE_loss/100, i)
 
-                total_loss = 0.0
-                total_mse_loss = 0.0
-                total_cE_loss = 0.0
+            #     total_loss = 0.0
+            #     total_mse_loss = 0.0
+            #     total_cE_loss = 0.0
 
 
         print('end of epoch', epoch)
-        # writer.add_scalar("total_Loss/train", total_loss, epoch)
-        # writer.add_scalar("total_mse_Loss/train", total_mse_loss, epoch)
-        # writer.add_scalar("total_cE_Loss/train", total_cE_loss, epoch)
+        writer.add_scalar("total_Loss/train", total_loss/len(train_loader), epoch)
+        writer.add_scalar("total_mse_Loss/train", total_mse_loss/len(train_loader), epoch)
+        writer.add_scalar("total_cE_Loss/train", total_cE_loss/len(train_loader), epoch)
 
     torch.save(encoder,'/data/onwood/sba_project_3D/model.pt')
 
