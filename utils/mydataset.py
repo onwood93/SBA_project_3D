@@ -447,7 +447,7 @@ class MyDataset(Dataset):
     def keypoints_normalize(self, keypoints):
 
         if len(keypoints.shape) == 4:
-            print(keypoints.shape)
+            # print(keypoints.shape)
             keypoints[:,:,:,[0]] = (keypoints[:,:,:,[0]]/1080)*2-1
             keypoints[:,:,:,[1]] = (keypoints[:,:,:,[1]]/1920)*2-1
             # normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
