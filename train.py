@@ -18,6 +18,7 @@ def main():
     #model, batch, label 부분에 to device 붙이기
     data_dir = 'adjusted_100_dataset'
     batch = 8
+    m = 0.999
     # start_time = time.time()
     dataset = MyDataset(data_dir, 1)
     train_loader = DataLoader(dataset, batch, shuffle=True, num_workers=8)
@@ -27,7 +28,10 @@ def main():
 
     encoder = Encoder().to(device)
     sp_encoder = deepcopy(encoder).to(device)
-    
+
+    for p in sp_encoder.parameters():
+        p.requires_grad = False
+
     decoder = Decoder().to(device)
     # loss 문제 해결 테스트: lr 바꾸기, 평균말고 다르게 만들기, 레이어 추가하기, 옵티마이저 바꾸기, regularization term 추가하기
     mse = nn.MSELoss()
@@ -53,7 +57,7 @@ def main():
             anchor = train_item['anchor'].to(device)
             h_input = train_item['anchor_heatmap'].to(device)
             f_input = train_item['anchor_flow'].to(device)
-            sp = train_item['semi_positives'].to(device)
+            # sp = train_item['semi_positives'].to(device)
             h_sp_input = train_item['sp_heatmap'].to(device)
             f_sp_input = train_item['sp_flow'].to(device)
             class_num = train_item['class'].to(device)
@@ -79,6 +83,10 @@ def main():
             optimizer.step()
 
             #########################
+            with torch.no_grad():
+                for param_a, param_sp in zip(encoder.parameters(), sp_encoder.parameters()):
+                    param_sp.data = param_sp.data * m + param_a.data * (1. - m)
+            #########################
 
             total_mse_loss += mse_loss
             total_cE_loss += cE_loss
@@ -101,14 +109,14 @@ def main():
 
 
         print('end of epoch', epoch)
-        writer.add_scalar("total_dtw_Loss/train", total_dtw_loss/len(train_loader), epoch)
         writer.add_scalar("total_Loss/train", total_loss/len(train_loader), epoch)
         writer.add_scalar("total_mse_Loss/train", total_mse_loss/len(train_loader), epoch)
         writer.add_scalar("total_cE_Loss/train", total_cE_loss/len(train_loader), epoch)
+        writer.add_scalar("total_dtw_Loss/train", total_dtw_loss/len(train_loader), epoch)
     
-    if (epoch + 1) % 10 == 0:
+    if (epoch) % 9 == 0:
         now = datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
-        save_fn = f'/data/onwood/sba_project_3D/model_{epoch+1}_{now}.pt'
+        save_fn = f'/data/onwood/sba_project_3D/model_{epoch}_{now}.pt'
         torch.save(encoder,save_fn)
 
 if __name__ == '__main__':
