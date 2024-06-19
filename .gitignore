@@ -1,0 +1,17 @@
+adjusted_100_dataset
+adjusted_dataset
+data
+dataset
+error_data
+runs
+tests
+tmp_dataset
+이상한키포인트.txt
+트레이닝결과에러.txt
+cifar10_tutorial.ipynb
+mydataset_input_size.txt
+heatmap_test.ipynb
+optical_flow_test.ipynb
+tensorboard_test.py
+test_model.ipynb
+tmp_dataset.py
