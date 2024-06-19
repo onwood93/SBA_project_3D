@@ -8,6 +8,7 @@ import torch
 from torch.utils.data import Dataset
 import utils.Configs as config
 import torchvision.transforms.functional as ttF
+import tqdm
 
 # def load_data_dir(data_dir):
 #     all_data_dir_list = []
@@ -59,19 +60,25 @@ def load_data_dir(data_dir):
 
 # 컨피던스 정보 확인해야 함
 class MyDataset(Dataset):
-    def __init__(self, data_dir='', num_semi_positives=10):
-        super().__init__()
-        self.h = config.H
-        self.w = config.W
-        self.data_dir = data_dir
-        self.num_semi_positives = num_semi_positives
-        # self.return_heatmap = return_heatmap
+    # def __init__(self, data_dir='', num_semi_positives=10):
+    #     super().__init__()
+    #     self.h = config.H
+    #     self.w = config.W
+    #     self.data_dir = data_dir
+    #     self.num_semi_positives = num_semi_positives
+    #     # self.return_heatmap = return_heatmap
 
-        # 데이터 경로 전체 리스트 & action별 정리된 딕셔너리
-        self.all_data_dir_list, self.action_dir_dic, self.label_dic = load_data_dir(self.data_dir)
+    #     # 데이터 경로 전체 리스트 & action별 정리된 딕셔너리
+    #     self.all_data_dir_list, self.action_dir_dic, self.label_dic = load_data_dir(self.data_dir)
 
-    def __len__(self):
-        return len(self.all_data_dir_list)
+    # def __len__(self):
+    #     return len(self.all_data_dir_list)
+
+    def extract_adjusted_kps_from_a_json(self, origin_vid_dir):
+        with open(origin_vid_dir, "r") as f:
+            origin_keypoints = json.load(f)
+
+        return np.array(origin_keypoints['annotation'])
 
     # 랜덤하게 original video 선정, augmentation 버전 생성, 랜덤하게 semi-positives 10개 추출
     def extract_keypoints_from_a_json(self, origin_vid_dir):
@@ -165,30 +172,46 @@ class MyDataset(Dataset):
         return aug_keypoints
 
     def compute_heatmap(self, keypoints, std=5, rate=0.25):
-        points = keypoints.reshape(-1,2) * rate
+        y_points = (keypoints[:, :,[0]] * rate).reshape(-1,1) # 561, 1
+        x_points = (keypoints[:, :,[1]] * rate).reshape(-1,1) # 561, 1
 
-        x_points = points[:,[0]]
-        y_points = points[:,[1]]
+        H = np.arange(self.h)[None, :] # 1, 270
+        W = np.arange(self.w)[None, :] # 1, 480
 
-        # H = np.tile(np.arange(h), h).reshape(h,h).T
-        # W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
-        # H = np.tile(np.arange(h)[:, None], (h, w))
-        # W = np.tile(np.arange(w)[None, :], (h, w))
-        H = np.tile(np.arange(self.h)[:, None], self.w)
-        W = np.tile(np.arange(self.w)[:, None], self.h).T
+        # H - y_points: (561, 270)
+        log_y_gauss = -0.5 * ((H - y_points)/std)**2 # (561, 270)
+        log_x_gauss = -0.5 * ((W - x_points)/std)**2 # (561, 480)
+        log_gauss = log_x_gauss[:, None, :] + log_y_gauss[:, :, None]
+        gauss = np.exp(log_gauss)
+        heatmaps = (gauss / gauss.max(axis=(-1, -2), keepdims=True)) * 2 - 1
 
-        heatmap_list = []
-        for i in range(len(x_points)):
-            x = x_points[i]
-            y = y_points[i]
-            # x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2)
-            # y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
-            y_gauss = np.exp(-0.5*((H-x)/std)**2)
-            x_gauss = np.exp(-0.5*((W-y)/std)**2)
-            frame = (x_gauss * y_gauss)
-            frame = (frame / frame.max()) * 2 - 1
-            heatmap_list.append(frame)
-        heatmaps = np.array(heatmap_list).reshape(-1, 17, self.h, self.w)
+        heatmaps = heatmaps.reshape(-1, 17, self.h, self.w)
+
+        #-----------------------------------------------
+        # points = keypoints.reshape(-1,2) * rate
+
+        # x_points = points[:,[0]]
+        # y_points = points[:,[1]]
+
+        # # H = np.tile(np.arange(h), h).reshape(h,h).T
+        # # W = np.tile(np.arange(reduced_w), reduced_w).reshape(reduced_w,reduced_w)
+        # # H = np.tile(np.arange(h)[:, None], (h, w))
+        # # W = np.tile(np.arange(w)[None, :], (h, w))
+        # H = np.tile(np.arange(self.h)[:, None], self.w)
+        # W = np.tile(np.arange(self.w)[:, None], self.h).T
+
+        # heatmap_list = []
+        # for i in range(len(x_points)):
+        #     x = x_points[i]
+        #     y = y_points[i]
+        #     # x_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((H-x)/std)**2)
+        #     # y_gauss = 1/(np.sqrt(2*np.pi)*std) * np.exp(-0.5*((W-y)/std)**2)
+        #     y_gauss = np.exp(-0.5*((H-x)/std)**2)
+        #     x_gauss = np.exp(-0.5*((W-y)/std)**2)
+        #     frame = (x_gauss * y_gauss)
+        #     frame = (frame / frame.max()) * 2 - 1
+        #     heatmap_list.append(frame)
+        # heatmaps = np.array(heatmap_list).reshape(-1, 17, self.h, self.w)
 
         return heatmaps
         # (frames, 17, 270, 480)
@@ -202,39 +225,88 @@ class MyDataset(Dataset):
         #     flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
         #     flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
         flow = reduced_keypoints[1:] - reduced_keypoints[:-1]
-        flow_x = flow[:,:,[0]]
-        flow_y = flow[:,:,[1]]
-        hw_zeros = torch.zeros(size=(self.h, self.w)) # 빈 판
+        # flow_x = flow[:,:,[0]]
+        # flow_y = flow[:,:,[1]]
+        # hw_zeros = torch.zeros(size=(self.h, self.w)) # 빈 판
         # flowmap = torch.zeros((len(flow), 2, self.h, self.w))
         # for i in range(len(flow)):
         #     flowmap[i][0] = flowmap[i][0] + flow[i][0]
         #     flowmap[i][1] = flowmap[i][1] + flow[i][1]
 
-        opt_flow_x = []
-        opt_flow_y = []
-        for i in range(1,len(heatmaps)):
-            heatmap = heatmaps[i]
-            for j in range(len(heatmap)):
-                tmp_x = ((hw_zeros + flow_x[i-1][j]) / 270) * 2 - 1
-                tmp_y = ((hw_zeros + flow_y[i-1][j]) / 480) * 2 - 1
-                opt_flow_x.append(tmp_x * heatmap[j])
-                opt_flow_y.append(tmp_y * heatmap[j])
+        # heatmaps -> (num_of_frames, num_of_keypoints, H, W)
+        # flow -> (num_of_frames - 1, num_of_keypoints, 2)
 
-        reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,self.h,self.w)
-        reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,self.h,self.w)
+        # tmp_x = ((hw_zeros + flow_x[i-1][j]) / 270) * 2 - 1
+        # tmp_y = ((hw_zeros + flow_y[i-1][j]) / 480) * 2 - 1
+        flow = np.stack([
+            (flow[..., 0] / 270) * 2 - 1,
+            (flow[..., 1] / 480) * 2 - 1
+        ], axis=-1)
 
-        return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=1)
-        # return np.concatenate((opt_flow_x, opt_flow_y),axis=1)
-        # (frames-1, 34, 270, 480)
+        # opt_flow_x.append(tmp_x * heatmap[j])
+        # opt_flow_y.append(tmp_y * heatmap[j])
+        opt_flow = heatmaps[1:, :, :, :, None] * flow[:, :, None, None, :] # (num_of_frames, num_of_keypoints, H, W, 2)
+        F, K, H, W, _ = opt_flow.shape
+        opt_flow = opt_flow.transpose(0, 1, 4, 2, 3).reshape(-1, K*2, H, W)
+        return opt_flow
+
+        # opt_flow_x = []
+        # opt_flow_y = []
+        # for i in range(1,len(heatmaps)):
+        #     heatmap = heatmaps[i]
+        #     for j in range(len(heatmap)):
+        #         tmp_x = ((hw_zeros + flow_x[i-1][j]) / 270) * 2 - 1
+        #         tmp_y = ((hw_zeros + flow_y[i-1][j]) / 480) * 2 - 1
+        #         opt_flow_x.append(tmp_x * heatmap[j])
+        #         opt_flow_y.append(tmp_y * heatmap[j])
+
+        # reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,self.h,self.w)
+        # reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,self.h,self.w)
+
+        # return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=1)
+    
+    # def compute_optical_flow(self, keypoints, heatmaps, rate=0.25):
+    #     reduced_keypoints = keypoints * rate
+
+    #     # flow_x = []
+    #     # flow_y = []
+    #     # for i in range(1, len(reduced_keypoints)):
+    #     #     flow_x.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[0]])
+    #     #     flow_y.append((reduced_keypoints[i] - reduced_keypoints[i-1])[:,[1]])
+    #     flow = reduced_keypoints[1:] - reduced_keypoints[:-1]
+    #     flow_x = flow[:,:,[0]]
+    #     flow_y = flow[:,:,[1]]
+    #     hw_zeros = torch.zeros(size=(self.h, self.w)) # 빈 판
+    #     # flowmap = torch.zeros((len(flow), 2, self.h, self.w))
+    #     # for i in range(len(flow)):
+    #     #     flowmap[i][0] = flowmap[i][0] + flow[i][0]
+    #     #     flowmap[i][1] = flowmap[i][1] + flow[i][1]
+
+    #     opt_flow_x = []
+    #     opt_flow_y = []
+    #     for i in range(1,len(heatmaps)):
+    #         heatmap = heatmaps[i]
+    #         for j in range(len(heatmap)):
+    #             tmp_x = ((hw_zeros + flow_x[i-1][j]) / 270) * 2 - 1
+    #             tmp_y = ((hw_zeros + flow_y[i-1][j]) / 480) * 2 - 1
+    #             opt_flow_x.append(tmp_x * heatmap[j])
+    #             opt_flow_y.append(tmp_y * heatmap[j])
+
+    #     reshape_opt_flow_x = (np.array(opt_flow_x)).reshape(-1,17,self.h,self.w)
+    #     reshape_opt_flow_y = (np.array(opt_flow_y)).reshape(-1,17,self.h,self.w)
+
+    #     return np.concatenate((reshape_opt_flow_x,reshape_opt_flow_y),axis=1)
+    #     # return np.concatenate((opt_flow_x, opt_flow_y),axis=1)
+    #     # (frames-1, 34, 270, 480)
     
     def adjusting_frame(self, origin_keypoint):
         if len(origin_keypoint) == 33:
             return origin_keypoint
         
         elif len(origin_keypoint) > 33:
-            uniform_num = np.random.uniform(0, len(origin_keypoint), 33)# 적어도 sorting해줄 것 / interpolation or np.linspace로 추출하는 방법 권장
-            uniform_origin_keypoint = [origin_keypoint[int(i)] for i in uniform_num]
-            return np.array(uniform_origin_keypoint)
+            linspace_num = np.linspace(0, len(origin_keypoint), 33)# 적어도 sorting해줄 것 / interpolation or np.linspace로 추출하는 방법 권장
+            linspace_origin_keypoint = [origin_keypoint[int(i)] for i in linspace_num]
+            return np.array(linspace_origin_keypoint)
 
         elif len(origin_keypoint) < 33:
             num_repet = math.ceil((33 - len(origin_keypoint)) / len(origin_keypoint) + 1)
@@ -327,17 +399,18 @@ class MyDataset(Dataset):
             with open (dir, "r") as f:
                 a_semi_positive_keypoints = json.load(f)
 
-            a_semi_positive_keypoints_anno = a_semi_positive_keypoints['annotations']
-            sp_a_keypoints=[]
-            for i in range(len(a_semi_positive_keypoints_anno)):
-                if len(a_semi_positive_keypoints_anno[i]) == 1:
-                    sp_a_keypoints.append(a_semi_positive_keypoints_anno[i]["0"])
+            sp_keypoints.append(a_semi_positive_keypoints['annotation'])
+
+            # sp_a_keypoints=[]
+            # for i in range(len(a_semi_positive_keypoints_anno)):
+            #     if len(a_semi_positive_keypoints_anno[i]) == 1:
+            #         sp_a_keypoints.append(a_semi_positive_keypoints_anno[i]["0"])
             
-            sp_keypoints.append(sp_a_keypoints)
+            # sp_keypoints.append(sp_a_keypoints)
         
-        adjusted_sp_keypoints = []
-        for i in range(len(sp_keypoints)):
-            adjusted_sp_keypoints.append(self.adjusting_frame(np.array(sp_keypoints[i])[:,:,[0,1]]))
+        # adjusted_sp_keypoints = []
+        # for i in range(len(sp_keypoints)):
+        #     adjusted_sp_keypoints.append(self.adjusting_frame(np.array(sp_keypoints[i])[:,:,[0,1]]))
 
         # tmp_list = []
         # increased_tmp_list=[]
@@ -348,7 +421,7 @@ class MyDataset(Dataset):
 
         # return np.array(sp_keypoints)[:,:,[0,1]].reshape(-1,17,2)
 
-        return np.array(adjusted_sp_keypoints)
+        return np.array(sp_keypoints)
 
     def crop_keypoints(self, keypoints, heatmaps, flows):
         tmp_origin = keypoints * 0.25
@@ -359,26 +432,61 @@ class MyDataset(Dataset):
         # print(origin_x_max, origin_x_min, origin_y_max, origin_y_min)
 
         margin = 25
-
-        crop_heatmap = torch.tensor(heatmaps[:,:,origin_x_min-margin:origin_x_max+margin,origin_y_min-margin:origin_y_max+margin], dtype=torch.float32)
+        x_min_margin = max(origin_x_min-margin, 0)
+        y_min_margin = max(origin_y_min-margin, 0)
+        # min - margin > 0 처리하면 될 것 같음
+        crop_heatmap = torch.tensor(heatmaps[:,:,x_min_margin:origin_x_max+margin,y_min_margin:origin_y_max+margin], dtype=torch.float32)
         resized_crop_heatmap = ttF.resize(crop_heatmap, (200,100))
 
         
-        crop_flow = torch.tensor(flows[:,:,origin_x_min-margin:origin_x_max+margin,origin_y_min-margin:origin_y_max+margin], dtype=torch.float32)
+        crop_flow = torch.tensor(flows[:,:,x_min_margin:origin_x_max+margin,y_min_margin:origin_y_max+margin], dtype=torch.float32)
         resized_crop_flow = ttF.resize(crop_flow, (200,100))
 
         return resized_crop_heatmap, resized_crop_flow
     
     def keypoints_normalize(self, keypoints):
-        if len(keypoints) == 4:
-            normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
+
+        if len(keypoints.shape) == 4:
+            print(keypoints.shape)
+            keypoints[:,:,:,[0]] = (keypoints[:,:,:,[0]]/1080)*2-1
+            keypoints[:,:,:,[1]] = (keypoints[:,:,:,[1]]/1920)*2-1
+            # normalized_keypoints = np.concatenate([(keypoints[:,:,:,[0]]/1080)*2-1, (keypoints[:,:,:,[1]]/1920)*2-1], axis = 3)
+            
         else:
+            # print(keypoints.shape)
             # print(keypoints[:,:,[0]].shape)
-            normalized_keypoints = np.concatenate([(keypoints[:,:,[0]]/1080)*2-1, (keypoints[:,:,[1]]/1920)*2-1], axis = 2)
+            # normalized_keypoints = np.concatenate([(keypoints[:,:,[0]]/1080)*2-1, (keypoints[:,:,[1]]/1920)*2-1], axis = 2)
+            keypoints[:,:,[0]] = (keypoints[:,:,[0]]/1080)*2-1
+            keypoints[:,:,[1]] = (keypoints[:,:,[1]]/1920)*2-1
 
-        return normalized_keypoints
+        return keypoints
+    
+    def make_anchor_set(self, all_data_dir_list):
+        anchor_set_list = []
+        for i in tqdm.tqdm(range(len(all_data_dir_list))):
+            origin_anchor_keypoints = self.extract_adjusted_kps_from_a_json(all_data_dir_list[i])
+            origin_heatmaps = self.compute_heatmap(origin_anchor_keypoints)
+            origin_flow = self.compute_optical_flow(origin_anchor_keypoints, origin_heatmaps)
+            resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(origin_anchor_keypoints, origin_heatmaps, origin_flow)
+            norm_adjusted_keypoints = self.keypoints_normalize(origin_anchor_keypoints)
+            anchor_set_list.append([all_data_dir_list[i], norm_adjusted_keypoints[1:], resized_origin_heatmap[1:], resized_origin_flow])
+        return anchor_set_list
+    
+    def __init__(self, data_dir='', num_semi_positives=10):
+        super().__init__()
+        self.h = config.H
+        self.w = config.W
+        self.data_dir = data_dir
+        self.num_semi_positives = num_semi_positives
+        # self.return_heatmap = return_heatmap
 
+        # 데이터 경로 전체 리스트 & action별 정리된 딕셔너리
+        self.all_data_dir_list, self.action_dir_dic, self.label_dic = load_data_dir(self.data_dir)
+        # self.anchor_set_list = self.make_anchor_set(self.all_data_dir_list)
 
+    def __len__(self):
+        return len(self.all_data_dir_list)
+    
     def __getitem__(self, index):
         """
         index 번째 데이터 가져오고 augmentation 해서 anchor, anchor_aug, semi_positives들 만드는 코드
@@ -408,13 +516,21 @@ class MyDataset(Dataset):
         # }
         # origin_vid_dir 랜덤하게 선정
         # self.random_vid_dir = random.choice(self.all_data_dir_list)
+
+        #------------------------------------------------------------------
         self.index_vid_dir = self.all_data_dir_list[index]
+        # chosen_anchor = self.anchor_set_list[index]
+        # chosen_anchor shape => [all_data_dir_list[i], norm_adjusted_keypoints[1:], resized_origin_heatmap[1:], resized_origin_flow]
+        # key_fn = chosen_anchor[0].split('/')[-1].split('_')[0]
         key_fn = self.index_vid_dir.split('/')[-1].split('_')[0]
         self.action = key_fn[key_fn.find('A'):]
 
         input_data = {}
         # 위의 형식대로 input_data에 집어넣기?
-        origin_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir)
+        #------------------------------------------------------------------
+        origin_anchor_keypoints = self.extract_adjusted_kps_from_a_json(self.index_vid_dir)
+        #------------------------------------------------------------------
+
         # anchor_keypoints = self.compute_body_parts(origin_anchor_keypoints) # 5 * (frames, 12 or 4)
 
         # # aug_anchor_keypoints = self.extract_keypoints_from_a_json(self.index_vid_dir) # (frames, 17, 2)
@@ -423,30 +539,41 @@ class MyDataset(Dataset):
         # sp_10 = self.semi_positives_maker() # (10*frames,17,2)
         # sp_10_keypoints = self.compute_body_parts(sp_10) # 5 * (10*frames, 12 or 4)
 
-        adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
-        origin_heatmaps = self.compute_heatmap(adjusted_keypoints)
-        origin_flow = self.compute_optical_flow(adjusted_keypoints, origin_heatmaps)
-        resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(adjusted_keypoints, origin_heatmaps, origin_flow)
-        
+        # adjusted_keypoints = self.adjusting_frame(origin_anchor_keypoints)
+        #------------------------------------------------------------------
+        origin_heatmaps = self.compute_heatmap(origin_anchor_keypoints)
+        origin_flow = self.compute_optical_flow(origin_anchor_keypoints, origin_heatmaps)
+        resized_origin_heatmap, resized_origin_flow = self.crop_keypoints(origin_anchor_keypoints, origin_heatmaps, origin_flow)
+        #------------------------------------------------------------------
+       
         # aug_keypoints = self.add_aug_to_anchor(adjusted_keypoints)
         # aug_heatmaps = self.compute_heatmap(aug_keypoints)
         # aug_flow = self.compute_optical_flow(aug_keypoints, aug_heatmaps)
         # resized_aug_heatmap, resized_aug_flow = self.crop_keypoints(aug_keypoints, aug_heatmaps, aug_flow)
 
-        # sp_10 = self.semi_positives_maker()
+        #------------------------------------------------------------------
+        sp_10 = self.semi_positives_maker()
 
-        # sp_heatmaps = []
-        # sp_flow = []
-        # for sp_1 in sp_10:
-        #     tmp_sp_heatmap = self.compute_heatmap(sp_1)
-        #     tmp_sp_flow = self.compute_optical_flow(sp_1, tmp_sp_heatmap)
-        #     tmp_resized_sp_heatmap, tmp_resized_sp_flow = self.crop_keypoints(sp_1, tmp_sp_heatmap, tmp_sp_flow)
-        #     sp_heatmaps.append(tmp_resized_sp_heatmap)
-        #     sp_flow.append(tmp_resized_sp_flow)
+        sp_heatmaps = []
+        sp_flow = []
+        for sp_1 in sp_10:
+            tmp_sp_heatmap = self.compute_heatmap(sp_1)
+            tmp_sp_flow = self.compute_optical_flow(sp_1, tmp_sp_heatmap)
+            tmp_resized_sp_heatmap, tmp_resized_sp_flow = self.crop_keypoints(sp_1, tmp_sp_heatmap, tmp_sp_flow)
+            sp_heatmaps.append(tmp_resized_sp_heatmap)
+            sp_flow.append(tmp_resized_sp_flow)
+        #------------------------------------------------------------------
 
-        norm_adjusted_keypoints = self.keypoints_normalize(adjusted_keypoints)
+
+
+        #------------------------------------------------------------------
+        norm_adjusted_keypoints = self.keypoints_normalize(origin_anchor_keypoints)
+        #------------------------------------------------------------------
+
         # norm_aug_keypoints = self.keypoints_normalize(aug_keypoints)
-        # norm_sp_10_keypoints = self.keypoints_normalize(sp_10)
+        #------------------------------------------------------------------
+        norm_sp_10_keypoints = self.keypoints_normalize(sp_10)
+        #------------------------------------------------------------------
         # print(sp_10.shape)
         # print(norm_sp_10_keypoints.shape)
 
@@ -488,13 +615,17 @@ class MyDataset(Dataset):
         input_data['anchor_heatmap'] = resized_origin_heatmap[1:] # (32, 17, 200, 100)
         input_data['anchor_flow'] = resized_origin_flow # (32, 34, 200, 100)
 
+        # input_data['anchor'] = torch.tensor(chosen_anchor[1], dtype=torch.float32) # (32, 17, 2)
+        # input_data['anchor_heatmap'] = chosen_anchor[2] # (32, 17, 200, 100)
+        # input_data['anchor_flow'] = chosen_anchor[3] # (32, 34, 200, 100)
+
         # input_data['augmentation'] = torch.tensor(norm_aug_keypoints[1:], dtype=torch.float32) # (32, 17, 2)
         # input_data['aug_heatmap'] = resized_aug_heatmap[1:] # (32, 17, 200, 100)
         # input_data['aug_flow'] = resized_aug_flow # (32, 17, 200, 100)
 
-        # input_data['semi_positives'] = torch.tensor(norm_sp_10_keypoints[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
-        # input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
-        # input_data['sp_flow'] = torch.tensor(np.array(sp_flow), dtype=torch.float32) # (num_semi_positivest, 32, 34, 270, 480)
+        input_data['semi_positives'] = torch.tensor(norm_sp_10_keypoints[:,1:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 2)
+        input_data['sp_heatmap'] = torch.tensor(np.array(sp_heatmaps)[:,1:,:,:,:], dtype=torch.float32) # (num_semi_positives, 32, 17, 270, 480)
+        input_data['sp_flow'] = torch.tensor(np.array(sp_flow), dtype=torch.float32) # (num_semi_positivest, 32, 34, 270, 480)
 
         input_data['class'] = torch.tensor(self.label_dic[self.action])
         # input_data['class'] = torch.tensor(int(self.action[1:]) - 1)
